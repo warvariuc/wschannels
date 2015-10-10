@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebSockets Chat</title>
+  </head>
+  <body>
+    <h1>Python WebSockets Channels</h1>
+    <form id="input-form">
+      <input id="input-channel" type="text" placeholder="Enter channel name" autofocus />
+      <button type="submit">Connect</button>
+    </form>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+    <script>
+$("#input-form").on("submit", function(event) {
+    event.preventDefault();
+    var channel = $("#input-channel").val();
+    window.location.href = '//' + location.host + '/channel/' + channel;
+});
+    </script>
+  </body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Channel '{{ channel }}'</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    #messages {
+      list-style-type: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    #messages li {
+      padding: 5px 10px;
+    }
+
+    #messages li:nth-child(odd) {
+      background: #eee;
+    }
+  </style>
+</head>
+<body style="font-family: sans-serif">
+<a href="/">Home</a>
+
+<h3>Channel '{{ channel }}'</h3>
+
+<ul id="messages"></ul>
+
+<form action="" id="input-form" style="background: #eeeeee; padding: 0.2em; width: 100%">
+  <input id="input-message" autocomplete="off" style="width: 90%"/>
+  <button style="width: 9%">Send</button>
+</form>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="//rawgit.com/joewalnes/reconnecting-websocket/master/reconnecting-websocket.js"></script>
+<script>
+  $(function () {
+    var socket = new ReconnectingWebSocket("ws://" + location.host + "/ws/{{ channel }}");
+
+    socket.onmessage = function (message) {
+      var $newMessage = $('<li>').text(message.data).appendTo($('#messages'));
+      $newMessage.get(0).scrollIntoView();
+    };
+
+    $("#input-form").on("submit", function (event) {
+      event.preventDefault();
+      var text = $("#input-message").val();
+      socket.send(text);
+      $("#input-message").val("");
+      return false;
+    });
+
+    $("#input-message").focus();
+  });
+</script>
+</body>
+</html>
