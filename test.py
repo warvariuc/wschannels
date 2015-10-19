@@ -100,9 +100,8 @@ class FutureSet:
     def _remove(self, item):
         assert item.done()
         self._set.remove(item)
-        if len(self._set) < self._maxsize:
-            while self._waiters:  # release all waiters
-                self._waiters.pop().set_result(None)
+        if self._waiters:  # release the oldest waiter
+            self._waiters.pop().set_result(None)
 
     @asyncio.coroutine
     def wait(self):
@@ -139,7 +138,6 @@ if __name__ == '__main__':
             client = WebSocketClient(client_id, url)
             if client_id % 100 == 0:
                 print_clients(client_id)
-            print_clients(client_id)
             yield from futures.add(client.run())
         print_clients(client_id)
         yield from futures.wait()
