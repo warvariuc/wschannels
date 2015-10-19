@@ -1,7 +1,8 @@
 WebSocket channels
 ==================
 
-The server is written for Python3 using AIOHTTP.
+The server is written for Python3 using AIOHTTP. As pub/sub mechanism is used MongoDB with a
+capped collection and a tailable cursor.
 
 It's like a chat where rooms are called 'channels'.
 
@@ -15,7 +16,7 @@ subchannel `/users/**/*`.
 The client can also send messages to server and the message will be sent to all clients listening
 on the same channel (including himself).
 
-Start the server under Gunicorn:
+Start the server under Gunicorn to have more workers:
 
     gunicorn wschannels:app --bind=localhost:5000 --worker-class=aiohttp.worker.GunicornWebWorker --workers=2
 

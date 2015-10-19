@@ -5,6 +5,7 @@ import time
 
 import aiohttp.web
 import aiohttp.errors
+import aiohttp_jinja2
 import jinja2
 import pymongo.errors
 
@@ -34,56 +35,59 @@ logging.config.dictConfig({
 logger = logging.getLogger(__name__)
 
 
-def render_template(template_name, context=None):
-    template = jinja_env.get_template(template_name)
-    text = template.render(context or {})
-    response = aiohttp.web.Response(text=text, content_type='text/html')
-    return response
-
-
+@aiohttp_jinja2.template('home.html')
 def home_handler(request):
-    response = render_template('home.html')
-    return response
+    return {}
 
 
+@aiohttp_jinja2.template('channel.html')
 def channel_handler(request):
-    response = render_template('channel.html', {'channel': request.match_info['channel']})
-    return response
+    return {'channel': request.match_info['channel']}
 
 
-class Channels():
+class Channels(dict):
     """Channels and web-sockets registered on them.
+    {channel_name: ({subchannel_name: {...}}, set([socket, ...])), ...}
     """
-    def __init__(self, name):
-        self.name = name
-        self.sockets = set()
-        self.subchannels = {}
+    _sockets = {}  # {socket: channel_path, ...}
 
-    def __getitem__(self, name):
-        """Get a sub-channel.
-        """
-        channel = self.subchannels.get(name)
-        if channel is None:
-            channel = self.__class__(self.name + '/' + name)
-            self.subchannels[name] = channel
-        return channel
+    def __init__(self, *args, name='', parent=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = name
+        self.parent = parent
+        self.sockets = set()
+
+    def __repr__(self):
+        return 'Channel {} with {} sockets'.format(self.name, len(self.sockets))
+
+    def get_subchannels(self, channel_path):
+        channels = self
+        for channel in channel_path.split('/'):
+            if channel:
+                try:
+                    channels = channels[channel]
+                except KeyError:
+                    channels = self.setdefault(channel, self.__class__(name=channel, parent=self))
+        return channels
 
     def add_socket(self, socket, channel):
-        sockets = self
-        for channel in channel.split('/'):
-            if channel:
-                sockets = sockets[channel]
-        sockets.sockets.add(socket)
+        assert socket not in self._sockets
+        channels = self.get_subchannels(channel)
+        channels.sockets.add(socket)
+        self._sockets[socket] = channels
+
+    def _gc(self):
+        if not self.sockets and self.parent:
+            del self.parent[self.name]
+            # logger.info('Removed channel `%s`', self.name)
+            self.parent._gc()
 
     def remove_socket(self, socket):
         # discard invalid connection
         # logger.info('Discarding invalid web-socket connection')
-        self._discard(socket)
-
-    def _discard(self, socket):
-        self.sockets.discard(socket)
-        for channel in tuple(self.subchannels.values()):
-            channel._discard(socket)
+        channels = self._sockets.pop(socket)
+        channels.sockets.discard(socket)
+        channels._gc()
 
     def get_sockets(self, channel='', subchannels=False):
         """Get all web-sockets from the given channel.
@@ -93,13 +97,10 @@ class Channels():
         Returns:
             iterable: of web-sockets
         """
-        channel_sockets = self
-        for channel in channel.split('/'):
-            if channel:
-                channel_sockets = channel_sockets[channel]
-        yield from tuple(channel_sockets.sockets)
+        channels = self.get_subchannels(channel)
+        yield from tuple(channels.sockets)
         if subchannels:
-            for subchannel in channel_sockets.subchannels.values():
+            for subchannel in channels.values():
                 yield from subchannel.get_sockets(subchannels=True)
 
 
@@ -116,7 +117,7 @@ class WSChannelServer():
             pass
         self.messages = db['messages']
 
-        self.channels = Channels('')
+        self.channels = Channels()
         self.event_loop = event_loop
         self.event_loop.call_soon(
             lambda loop: loop.run_in_executor(None, self.get_messages), event_loop)
@@ -195,10 +196,10 @@ class WSChannelServer():
 
 mongo_client = pymongo.MongoClient('mongodb://localhost:27017/')
 
-jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader('templates'))
 event_loop = asyncio.get_event_loop()
 ws_server = WSChannelServer(mongo_client['wschannels'], event_loop)
 app = aiohttp.web.Application()
+aiohttp_jinja2.setup(app, loader=jinja2.FileSystemLoader('templates'))
 
 app.router.add_route('GET', '/', home_handler)
 app.router.add_route('GET', r'/channel/{channel:.+}', channel_handler)
@@ -213,6 +214,13 @@ if __name__ == '__main__':
 
     print('Serving on', srv.sockets[0].getsockname())
 
+    import pympler.tracker
+    import pympler.process
+    pmi = pympler.process.ProcessMemoryInfo()
+    print("\nVirtual size (bytes): {:,}".format(pmi.vsz))
+    print("Resident set size (bytes): {:,}".format(pmi.rss))
+    tr = pympler.tracker.SummaryTracker()
+
     try:
         event_loop.run_forever()
     except KeyboardInterrupt:
@@ -223,3 +231,8 @@ if __name__ == '__main__':
         event_loop.run_until_complete(srv.wait_closed())
         event_loop.run_until_complete(app.finish())
     event_loop.close()
+
+    pmi = pympler.process.ProcessMemoryInfo()
+    print("\nVirtual size (bytes): {:,}".format(pmi.vsz))
+    print("Resident set size (bytes): {:,}".format(pmi.rss))
+    tr.print_diff()
