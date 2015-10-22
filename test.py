@@ -108,8 +108,6 @@ class FutureSet:
         return asyncio.wait(self._set)
 
 
-# TODO: try to use asyncio.BoundedSemaphore (http://stackoverflow.com/a/20722204/248296)
-
 if __name__ == '__main__':
 
     arg_parser = argparse.ArgumentParser(description='WebSocket Channels test')

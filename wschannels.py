@@ -58,7 +58,7 @@ class Channels(dict):
         self.sockets = set()
 
     def __repr__(self):
-        return 'Channel {} with {} sockets'.format(self.name, len(self.sockets))
+        return 'Channel `{}` with {} socket(s)'.format(self.name, len(self.sockets))
 
     def get_subchannels(self, channel_path):
         channels = self
@@ -67,7 +67,8 @@ class Channels(dict):
                 try:
                     channels = channels[channel]
                 except KeyError:
-                    channels = self.setdefault(channel, self.__class__(name=channel, parent=self))
+                    channels = channels.setdefault(
+                        channel, self.__class__(name=channel, parent=channels))
         return channels
 
     def add_socket(self, socket, channel):
@@ -77,14 +78,15 @@ class Channels(dict):
         self._sockets[socket] = channels
 
     def _gc(self):
-        if not self.sockets and self.parent:
+        if not self.sockets and not self and self.parent:
+            # if there are not sockets in this channels and no subchannels -- garbage collect it
             del self.parent[self.name]
             # logger.info('Removed channel `%s`', self.name)
             self.parent._gc()
 
     def remove_socket(self, socket):
         # discard invalid connection
-        # logger.info('Discarding invalid web-socket connection')
+        # logger.info('Discarding invalid web-socket connection: %s', socket)
         channels = self._sockets.pop(socket)
         channels.sockets.discard(socket)
         channels._gc()
@@ -158,14 +160,31 @@ class WSChannelServer():
         [{'channel': channel, 'message': message}, ...]
         """
         data = yield from request.json()
+        if not isinstance(data, list):
+            raise aiohttp.web.HTTPBadRequest(text='A list is expected')
         for _data in data:
-            self.publish_message(_data['channel'], _data['message'])
+            if not isinstance(_data, dict):
+                raise aiohttp.web.HTTPBadRequest(text='A list of dicts is expected')
+            channel = _data.get('channel')
+            if not isinstance(channel, str):
+                raise aiohttp.web.HTTPBadRequest(text='`channel` must be a string')
+            message = _data.get('message')
+            if not isinstance(message, str):
+                raise aiohttp.web.HTTPBadRequest(text='`message` must be a string')
+            self.publish_message(channel, message)
             yield  # give control to the loop
         return aiohttp.web.Response(text='ok')
 
     def get_messages(self):
         """Get new messages from the shared queue.
         """
+        while True:
+            try:
+                return self._get_messages()
+            except Exception:
+                logger.exception('Error in `get_messages` loop. Launching it again.')
+
+    def _get_messages(self):
         # get the most recent message id
         last_id = None
         for messsage in self.messages.find().sort([('$natural', -1)]):
@@ -189,9 +208,11 @@ class WSChannelServer():
         """
         for ws in self.channels.get_sockets(channel, subchannels=channel.endswith('/')):
             try:
-                ws.send_str(message)
+                ws.send_str(str(message))
             except aiohttp.errors.DisconnectedError:
                 self.channels.remove_socket(ws)
+            except Exception as exc:
+                logger.error('Could not send message: %s', exc)
 
 
 mongo_client = pymongo.MongoClient('mongodb://localhost:27017/')
